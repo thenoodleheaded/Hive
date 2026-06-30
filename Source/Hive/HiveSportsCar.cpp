@@ -4,10 +4,14 @@
 #include "HiveSportsCar.h"
 #include "HiveSportsWheelFront.h"
 #include "HiveSportsWheelRear.h"
-#include "ChaosWheeledVehicleMovementComponent.h"
+#include "HiveVehicleMovementComponent.h"
+#include "WheeledVehiclePawn.h"
 
-AHiveSportsCar::AHiveSportsCar()
+AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UHiveVehicleMovementComponent>(AWheeledVehiclePawn::VehicleMovementComponentName))
 {
+	SyncPhysicsProfileToMovementComponent();
+
 	// Note: for faster iteration times, the vehicle setup can be tweaked in the Blueprint instead
 
 	// Set up the chassis
@@ -66,4 +70,12 @@ AHiveSportsCar::AHiveSportsCar()
 	// NOTE: Check the Blueprint asset for the Steering Curve
 	GetChaosVehicleMovement()->SteeringSetup.SteeringType = ESteeringType::Ackermann;
 	GetChaosVehicleMovement()->SteeringSetup.AngleRatio = 0.7f;
+}
+
+void AHiveSportsCar::SyncPhysicsProfileToMovementComponent() const
+{
+	if (UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(GetChaosVehicleMovement()))
+	{
+		HiveMovement->PhysicsProfile = PhysicsProfile;
+	}
 }

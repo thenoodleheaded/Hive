@@ -91,7 +91,7 @@ protected:
 	FTimerHandle FlipCheckTimer;
 
 public:
-	AHivePawn();
+	AHivePawn(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	// Begin Pawn interface
 
