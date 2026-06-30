@@ -1,7 +1,9 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "HiveVehicleMovementComponent.h"
+#include "Hive.h"
 #include "HiveSportsCar.h"
+#include "PhysicsEngine/BodyInstance.h"
 #include "UCarPhysicsProfile.h"
 
 namespace
@@ -9,6 +11,23 @@ namespace
 	float MapProfileStat(float NormalisedStat, float MinValue, float MaxValue)
 	{
 		return FMath::Lerp(MinValue, MaxValue, FMath::Clamp(NormalisedStat, 0.0f, 1.0f));
+	}
+
+	const TCHAR* LexToString(EHiveDriftState DriftState)
+	{
+		switch (DriftState)
+		{
+		case EHiveDriftState::Gripping:
+			return TEXT("Gripping");
+		case EHiveDriftState::Initiating:
+			return TEXT("Initiating");
+		case EHiveDriftState::Drifting:
+			return TEXT("Drifting");
+		case EHiveDriftState::Recovering:
+			return TEXT("Recovering");
+		default:
+			return TEXT("Unknown");
+		}
 	}
 }
 
@@ -82,4 +101,139 @@ void UHiveVehicleMovementComponent::SetupVehicle(TUniquePtr<Chaos::FSimpleWheele
 			VehicleWheel.MaxSteeringAngle = PendingMaxSteerAngle;
 		}
 	}
+}
+
+void UHiveVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	const float LateralVelocity = GetSignedLateralVelocity();
+	const float SteeringInputValue = GetSteeringInput();
+	const float ThrottleInputValue = GetThrottleInput();
+	const bool bHandbrakeActive = GetHandbrakeInput();
+
+	UpdateDriftState(LateralVelocity, SteeringInputValue, ThrottleInputValue, bHandbrakeActive);
+	ApplyDriftVelocityManipulation(DeltaTime);
+}
+
+float UHiveVehicleMovementComponent::GetSignedLateralVelocity() const
+{
+	const USceneComponent* ReferenceComponent = UpdatedComponent ? UpdatedComponent.Get() : GetOwner() ? GetOwner()->GetRootComponent() : nullptr;
+	if (!ReferenceComponent)
+	{
+		return 0.0f;
+	}
+
+	return FVector::DotProduct(ReferenceComponent->GetComponentVelocity(), ReferenceComponent->GetRightVector());
+}
+
+void UHiveVehicleMovementComponent::UpdateDriftState(float LateralVelocity, float SteeringInputValue, float ThrottleInputValue, bool bHandbrakeActive)
+{
+	const float AbsLateralVelocity = FMath::Abs(LateralVelocity);
+	const bool bSteerThrottleInitiation = FMath::Abs(SteeringInputValue) > SteeringDriftThreshold && ThrottleInputValue > ThrottleDriftThreshold;
+	const bool bInitiationStillActive = bHandbrakeActive || bSteerThrottleInitiation;
+
+	switch (CurrentDriftState)
+	{
+	case EHiveDriftState::Gripping:
+		if (bInitiationStillActive)
+		{
+			SetDriftState(EHiveDriftState::Initiating, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		}
+		break;
+
+	case EHiveDriftState::Initiating:
+		if (AbsLateralVelocity > LateralVelocityDriftThreshold)
+		{
+			SetDriftState(EHiveDriftState::Drifting, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		}
+		else if (!bInitiationStillActive)
+		{
+			SetDriftState(EHiveDriftState::Gripping, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		}
+		break;
+
+	case EHiveDriftState::Drifting:
+		if (AbsLateralVelocity < LateralVelocityRecoveryThreshold)
+		{
+			SetDriftState(EHiveDriftState::Recovering, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		}
+		break;
+
+	case EHiveDriftState::Recovering:
+		if (AbsLateralVelocity < LateralVelocityRecoveryThreshold)
+		{
+			SetDriftState(EHiveDriftState::Gripping, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		}
+		break;
+
+	default:
+		SetDriftState(EHiveDriftState::Gripping, LateralVelocity, SteeringInputValue, ThrottleInputValue);
+		break;
+	}
+
+	++DriftStateTickCount;
+}
+
+void UHiveVehicleMovementComponent::SetDriftState(EHiveDriftState NewState, float LateralVelocity, float SteeringInputValue, float ThrottleInputValue)
+{
+	if (CurrentDriftState == NewState)
+	{
+		return;
+	}
+
+	const EHiveDriftState OldState = CurrentDriftState;
+	CurrentDriftState = NewState;
+	DriftStateTickCount = 0;
+
+	if (OldState == EHiveDriftState::Initiating && CurrentDriftState == EHiveDriftState::Drifting)
+	{
+		DriftEntrySpeed = FMath::Abs(GetForwardSpeed());
+		DriftTargetRetainedSpeed = 0.0f;
+		DriftActualForwardSpeed = DriftEntrySpeed;
+	}
+
+	UE_LOG(LogHive, Log, TEXT("[DriftFSM] State change: %s -> %s at LateralVel=%.1f, Steering=%.2f, Throttle=%.2f"),
+		LexToString(OldState),
+		LexToString(CurrentDriftState),
+		LateralVelocity,
+		SteeringInputValue,
+		ThrottleInputValue);
+}
+
+void UHiveVehicleMovementComponent::ApplyDriftVelocityManipulation(float DeltaTime)
+{
+	if (CurrentDriftState != EHiveDriftState::Drifting)
+	{
+		return;
+	}
+
+	FBodyInstance* TargetInstance = GetBodyInstance();
+	const USceneComponent* ReferenceComponent = UpdatedComponent ? UpdatedComponent.Get() : GetOwner() ? GetOwner()->GetRootComponent() : nullptr;
+	if (!TargetInstance || !ReferenceComponent)
+	{
+		return;
+	}
+
+	const FVector ForwardVector = ReferenceComponent->GetForwardVector();
+	const FVector RightVector = ReferenceComponent->GetRightVector();
+	const FVector CurrentVelocity = ReferenceComponent->GetComponentVelocity();
+
+	const float CurrentForwardSpeed = FVector::DotProduct(CurrentVelocity, ForwardVector);
+	const float CurrentLateralSpeed = FVector::DotProduct(CurrentVelocity, RightVector);
+	const FVector ForwardComponent = ForwardVector * CurrentForwardSpeed;
+	const FVector LateralComponent = RightVector * CurrentLateralSpeed;
+	const FVector RemainingVelocity = CurrentVelocity - ForwardComponent - LateralComponent;
+
+	const float RetentionAlpha = (DriftSpeedRetentionMin + DriftSpeedRetentionMax) * 0.5f;
+	DriftTargetRetainedSpeed = DriftEntrySpeed * RetentionAlpha;
+	DriftActualForwardSpeed = FMath::Abs(CurrentForwardSpeed);
+
+	const float ForwardDirection = FMath::Abs(CurrentForwardSpeed) > KINDA_SMALL_NUMBER ? FMath::Sign(CurrentForwardSpeed) : 1.0f;
+	const float TargetForwardSpeed = DriftTargetRetainedSpeed * ForwardDirection;
+	const float AdjustedForwardSpeed = FMath::FInterpTo(CurrentForwardSpeed, TargetForwardSpeed, DeltaTime, SpeedRetentionLerpSpeed);
+	const float AdjustedLateralSpeed = CurrentLateralSpeed * LateralVelocitySustainFactor;
+
+	const FVector AdjustedVelocity = (ForwardVector * AdjustedForwardSpeed) + (RightVector * AdjustedLateralSpeed) + RemainingVelocity;
+	TargetInstance->SetLinearVelocity(AdjustedVelocity, false);
 }
