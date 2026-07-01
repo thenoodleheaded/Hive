@@ -68,7 +68,7 @@ void UHiveVehicleMovementComponent::PrepareProfileValues()
 	const float PendingTorqueMultiplier = MapProfileStat(AccelerationStat, 0.7f, 1.4f);
 	EngineSetup.MaxTorque = BaseMaxTorque * PendingTorqueMultiplier;
 
-	PendingMaxSteerAngle = MapProfileStat(HandlingStat, 25.0f, 45.0f);
+	PendingMaxSteerAngle = MapProfileStat(HandlingStat, 30.0f, 50.0f);
 	PendingMaxBrakeTorque = MapProfileStat(BrakingStat, 3000.0f, 6000.0f);
 	PendingFrictionForceMultiplier = MapProfileStat(GripStat, 2.0f, 5.0f);
 	bHasPendingProfileValues = true;

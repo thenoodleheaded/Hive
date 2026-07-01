@@ -68,8 +68,11 @@ AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
 
 	// Set up the steering
 	// NOTE: Check the Blueprint asset for the Steering Curve
-	GetChaosVehicleMovement()->SteeringSetup.SteeringType = ESteeringType::Ackermann;
-	GetChaosVehicleMovement()->SteeringSetup.AngleRatio = 0.7f;
+	GetChaosVehicleMovement()->SteeringSetup.SteeringType = ESteeringType::SingleAngle;
+	GetChaosVehicleMovement()->SteeringSetup.AngleRatio = 1.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.RiseRate = 100.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.FallRate = 100.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.InputCurveFunction = EInputFunctionType::LinearFunction;
 }
 
 void AHiveSportsCar::SyncPhysicsProfileToMovementComponent() const
