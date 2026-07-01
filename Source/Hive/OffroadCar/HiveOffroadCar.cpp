@@ -7,7 +7,6 @@
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 
 AHiveOffroadCar::AHiveOffroadCar()

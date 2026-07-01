@@ -6,11 +6,6 @@
 #include "GameFramework/PlayerStart.h"
 #include "Engine/World.h"
 
-AOffroadGameMode::AOffroadGameMode()
-{
-	// stub
-}
-
 void AOffroadGameMode::BeginPlay()
 {
 	Super::BeginPlay();

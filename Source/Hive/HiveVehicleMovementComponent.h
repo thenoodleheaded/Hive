@@ -68,7 +68,6 @@ private:
 	float DriftTargetRetainedSpeed = 0.0f;
 	float DriftActualForwardSpeed = 0.0f;
 	bool bHasPendingProfileValues = false;
-	float PendingTorqueMultiplier = 1.0f;
 	float PendingMaxSteerAngle = 40.0f;
 	float PendingMaxBrakeTorque = 4500.0f;
 	float PendingFrictionForceMultiplier = 3.0f;

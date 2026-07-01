@@ -7,7 +7,6 @@
 #include "HiveSportsCar.generated.h"
 
 class UCarPhysicsProfile;
-class UHiveVehicleMovementComponent;
 
 /**
  *  Sports car wheeled vehicle implementation

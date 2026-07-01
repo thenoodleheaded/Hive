@@ -1,19 +1,14 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "HivePawn.h"
-#include "HiveWheelFront.h"
-#include "HiveWheelRear.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Hive.h"
 #include "TimerManager.h"
-
-#define LOCTEXT_NAMESPACE "VehiclePawn"
 
 AHivePawn::AHivePawn(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -296,5 +291,3 @@ void AHivePawn::FlippedCheck()
 		bPreviousFlipCheck = false;
 	}
 }
-
-#undef LOCTEXT_NAMESPACE

@@ -4,9 +4,7 @@
 #include "TimeTrialGameMode.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimeTrialTrackGate.h"
-#include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerStart.h"
-#include "Engine/World.h"
 
 void ATimeTrialGameMode::BeginPlay()
 {

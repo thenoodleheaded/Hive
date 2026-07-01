@@ -18,11 +18,6 @@
 #include "GameFramework/PlayerStart.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
-void ATimeTrialPlayerController::BeginPlay()
-{
-	Super::BeginPlay();
-}
-
 void ATimeTrialPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
