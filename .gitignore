@@ -21,6 +21,7 @@ xcuserdata/
 
 # Platform-specific caches and local metadata
 .DS_Store
+Hive.uproject alias
 Thumbs.db
 ehthumbs.db
 Desktop.ini
