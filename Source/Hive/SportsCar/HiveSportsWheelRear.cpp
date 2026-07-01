@@ -7,7 +7,7 @@ UHiveSportsWheelRear::UHiveSportsWheelRear()
 {
 	WheelRadius = 40.f;
 	WheelWidth = 40.0f;
-	FrictionForceMultiplier = 4.0f;
+	FrictionForceMultiplier = 2.0f;
 	SlipThreshold = 100.0f;
 	SkidThreshold = 100.0f;
 	MaxSteerAngle = 0.0f;

@@ -15,7 +15,7 @@ AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
 	// Note: for faster iteration times, the vehicle setup can be tweaked in the Blueprint instead
 
 	// Set up the chassis
-	GetChaosVehicleMovement()->ChassisHeight = 144.0f;
+	GetChaosVehicleMovement()->ChassisHeight = 110.0f;
 	GetChaosVehicleMovement()->DragCoefficient = 0.31f;
 
 	// Set up the wheels
@@ -40,7 +40,7 @@ AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
 
 	// Set up the engine
 	// NOTE: Check the Blueprint asset for the Torque Curve
-	GetChaosVehicleMovement()->EngineSetup.MaxTorque = 750.0f;
+	GetChaosVehicleMovement()->EngineSetup.MaxTorque = 1100.0f;
 	GetChaosVehicleMovement()->EngineSetup.MaxRPM = 7000.0f;
 	GetChaosVehicleMovement()->EngineSetup.EngineIdleRPM = 900.0f;
 	GetChaosVehicleMovement()->EngineSetup.EngineBrakeEffect = 0.2f;
