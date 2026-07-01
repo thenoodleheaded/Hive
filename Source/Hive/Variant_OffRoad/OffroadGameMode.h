@@ -16,9 +16,6 @@ class AOffroadGameMode : public AGameModeBase
 	
 public:
 
-	/** Constructor */
-	AOffroadGameMode();
-
 protected:
 
 	/** Initialization */

@@ -4,14 +4,18 @@
 #include "HiveSportsCar.h"
 #include "HiveSportsWheelFront.h"
 #include "HiveSportsWheelRear.h"
-#include "ChaosWheeledVehicleMovementComponent.h"
+#include "HiveVehicleMovementComponent.h"
+#include "WheeledVehiclePawn.h"
 
-AHiveSportsCar::AHiveSportsCar()
+AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UHiveVehicleMovementComponent>(AWheeledVehiclePawn::VehicleMovementComponentName))
 {
+	SyncPhysicsProfileToMovementComponent();
+
 	// Note: for faster iteration times, the vehicle setup can be tweaked in the Blueprint instead
 
 	// Set up the chassis
-	GetChaosVehicleMovement()->ChassisHeight = 144.0f;
+	GetChaosVehicleMovement()->ChassisHeight = 110.0f;
 	GetChaosVehicleMovement()->DragCoefficient = 0.31f;
 
 	// Set up the wheels
@@ -36,7 +40,7 @@ AHiveSportsCar::AHiveSportsCar()
 
 	// Set up the engine
 	// NOTE: Check the Blueprint asset for the Torque Curve
-	GetChaosVehicleMovement()->EngineSetup.MaxTorque = 750.0f;
+	GetChaosVehicleMovement()->EngineSetup.MaxTorque = 1100.0f;
 	GetChaosVehicleMovement()->EngineSetup.MaxRPM = 7000.0f;
 	GetChaosVehicleMovement()->EngineSetup.EngineIdleRPM = 900.0f;
 	GetChaosVehicleMovement()->EngineSetup.EngineBrakeEffect = 0.2f;
@@ -64,6 +68,17 @@ AHiveSportsCar::AHiveSportsCar()
 
 	// Set up the steering
 	// NOTE: Check the Blueprint asset for the Steering Curve
-	GetChaosVehicleMovement()->SteeringSetup.SteeringType = ESteeringType::Ackermann;
-	GetChaosVehicleMovement()->SteeringSetup.AngleRatio = 0.7f;
+	GetChaosVehicleMovement()->SteeringSetup.SteeringType = ESteeringType::SingleAngle;
+	GetChaosVehicleMovement()->SteeringSetup.AngleRatio = 1.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.RiseRate = 100.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.FallRate = 100.0f;
+	GetChaosVehicleMovement()->SteeringInputRate.InputCurveFunction = EInputFunctionType::LinearFunction;
+}
+
+void AHiveSportsCar::SyncPhysicsProfileToMovementComponent() const
+{
+	if (UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(GetChaosVehicleMovement()))
+	{
+		HiveMovement->PhysicsProfile = PhysicsProfile;
+	}
 }

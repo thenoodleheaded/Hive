@@ -86,9 +86,6 @@ protected:
 
 protected:
 
-	/** Gameplay initialization */
-	virtual void BeginPlay() override;
-
 	/** Input initialization */
 	virtual void SetupInputComponent() override;
 

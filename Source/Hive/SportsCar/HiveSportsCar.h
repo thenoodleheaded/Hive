@@ -6,6 +6,8 @@
 #include "HivePawn.h"
 #include "HiveSportsCar.generated.h"
 
+class UCarPhysicsProfile;
+
 /**
  *  Sports car wheeled vehicle implementation
  */
@@ -13,8 +15,19 @@ UCLASS(abstract)
 class AHiveSportsCar : public AHivePawn
 {
 	GENERATED_BODY()
-	
+
+protected:
+
+	UPROPERTY(EditAnywhere, Category = "Profile")
+	UCarPhysicsProfile* PhysicsProfile = nullptr;
+		
 public:
 
-	AHiveSportsCar();
+	AHiveSportsCar(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+	UCarPhysicsProfile* GetPhysicsProfile() const { return PhysicsProfile; }
+
+private:
+
+	void SyncPhysicsProfileToMovementComponent() const;
 };

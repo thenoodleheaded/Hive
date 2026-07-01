@@ -1,21 +1,18 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "HivePawn.h"
-#include "HiveWheelFront.h"
-#include "HiveWheelRear.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
-#include "EnhancedInputSubsystems.h"
+#include "HiveVehicleMovementComponent.h"
 #include "InputActionValue.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Hive.h"
 #include "TimerManager.h"
 
-#define LOCTEXT_NAMESPACE "VehiclePawn"
-
-AHivePawn::AHivePawn()
+AHivePawn::AHivePawn(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	// construct the front camera boom
 	FrontSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("Front Spring Arm"));
@@ -117,10 +114,37 @@ void AHivePawn::Tick(float Delta)
 	GetMesh()->SetAngularDamping(bMovingOnGround ? 0.0f : 3.0f);
 
 	// realign the camera yaw to face front
-	float CameraYaw = BackSpringArm->GetRelativeRotation().Yaw;
+	const FRotator CurrentBackSpringArmRotation = BackSpringArm->GetRelativeRotation();
+	float CameraYaw = CurrentBackSpringArmRotation.Yaw;
 	CameraYaw = FMath::FInterpTo(CameraYaw, 0.0f, Delta, 1.0f);
 
-	BackSpringArm->SetRelativeRotation(FRotator(0.0f, CameraYaw, 0.0f));
+	const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(GetChaosVehicleMovement());
+	float TargetRoll = 0.0f;
+	float TargetFOV = BaseFOV;
+
+	if (HiveMovement)
+	{
+		const EHiveDriftState DriftState = HiveMovement->CurrentDriftState;
+		const float CurrentSlipAngleDegrees = HiveMovement->GetCurrentSlipAngleDegrees();
+
+		if (!bFrontCameraActive && (DriftState == EHiveDriftState::Drifting || DriftState == EHiveDriftState::Recovering))
+		{
+			const float LateralVelocity = FVector::DotProduct(GetVelocity(), GetActorRightVector());
+			const float RollDirection = FMath::IsNearlyZero(LateralVelocity) ? 0.0f : FMath::Sign(LateralVelocity);
+			const float SlipRollFraction = FMath::Clamp(CurrentSlipAngleDegrees / 25.0f, 0.0f, 1.0f);
+			TargetRoll = MaxDriftRollDegrees * SlipRollFraction * RollDirection;
+		}
+
+		const float ForwardSpeed = FMath::Clamp(FVector::DotProduct(GetVelocity(), GetActorForwardVector()), 0.0f, TopSpeedReference);
+		const float SpeedFraction = TopSpeedReference > KINDA_SMALL_NUMBER ? ForwardSpeed / TopSpeedReference : 0.0f;
+		TargetFOV = FMath::Lerp(BaseFOV, MaxFOV, SpeedFraction);
+	}
+
+	const float CameraRoll = FMath::FInterpTo(CurrentBackSpringArmRotation.Roll, TargetRoll, Delta, DriftRollBlendSpeed);
+	BackSpringArm->SetRelativeRotation(FRotator(CurrentBackSpringArmRotation.Pitch, CameraYaw, CameraRoll));
+
+	const float CameraFOV = FMath::FInterpTo(BackCamera->FieldOfView, TargetFOV, Delta, FOVBlendSpeed);
+	BackCamera->SetFieldOfView(CameraFOV);
 }
 
 void AHivePawn::Steering(const FInputActionValue& Value)
@@ -295,5 +319,3 @@ void AHivePawn::FlippedCheck()
 		bPreviousFlipCheck = false;
 	}
 }
-
-#undef LOCTEXT_NAMESPACE
