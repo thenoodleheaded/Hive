@@ -10,6 +10,7 @@ class UCameraComponent;
 class USpringArmComponent;
 class UInputAction;
 class UChaosWheeledVehicleMovementComponent;
+class UHiveVehicleMovementComponent;
 struct FInputActionValue;
 
 /**
@@ -89,6 +90,24 @@ protected:
 
 	/** Flip check timer */
 	FTimerHandle FlipCheckTimer;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|DriftRoll", meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "20.0", ToolTip = "Maximum spring arm roll angle during a full drift."))
+	float MaxDriftRollDegrees = 10.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|DriftRoll", meta = (ClampMin = "1.0", ClampMax = "15.0", UIMin = "1.0", UIMax = "15.0", ToolTip = "How fast the camera rolls into and out of drift angle."))
+	float DriftRollBlendSpeed = 5.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|FOV", meta = (ClampMin = "60.0", ClampMax = "100.0", UIMin = "60.0", UIMax = "100.0", ToolTip = "Camera FOV at standstill."))
+	float BaseFOV = 78.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|FOV", meta = (ClampMin = "70.0", ClampMax = "120.0", UIMin = "70.0", UIMax = "120.0", ToolTip = "Camera FOV at top speed."))
+	float MaxFOV = 92.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|FOV", meta = (ClampMin = "1.0", ClampMax = "10.0", UIMin = "1.0", UIMax = "10.0", ToolTip = "How fast FOV changes with speed."))
+	float FOVBlendSpeed = 4.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Camera|FOV", meta = (ClampMin = "500.0", ClampMax = "8000.0", UIMin = "500.0", UIMax = "8000.0", ToolTip = "Speed in cm/s considered top speed for FOV scaling. Tune to match your car's actual top speed."))
+	float TopSpeedReference = 3000.0f;
 
 public:
 	AHivePawn(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());

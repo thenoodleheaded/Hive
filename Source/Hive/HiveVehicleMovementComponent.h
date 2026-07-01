@@ -77,6 +77,8 @@ public:
 	virtual void SetupVehicle(TUniquePtr<Chaos::FSimpleWheeledVehicle>& PVehicle) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	float GetCurrentSlipAngleDegrees() const { return CurrentSlipAngleDegrees; }
+
 private:
 	float InitiatingTimer = 0.0f;
 	float DriftingTimer = 0.0f;
