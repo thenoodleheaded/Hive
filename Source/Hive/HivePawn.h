@@ -10,7 +10,7 @@ class UCameraComponent;
 class USpringArmComponent;
 class UInputAction;
 class UChaosWheeledVehicleMovementComponent;
-class UHiveVehicleMovementComponent;
+class APowerUpBase;
 struct FInputActionValue;
 
 /**
@@ -109,8 +109,20 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Camera|FOV", meta = (ClampMin = "500.0", ClampMax = "8000.0", UIMin = "500.0", UIMax = "8000.0", ToolTip = "Speed in cm/s considered top speed for FOV scaling. Tune to match your car's actual top speed."))
 	float TopSpeedReference = 3000.0f;
 
+#if WITH_EDITORONLY_DATA
+	UPROPERTY(EditAnywhere, Category = "Debug|PowerUps")
+	TArray<TSubclassOf<APowerUpBase>> DebugStartingPowerUps;
+
+	UPROPERTY(EditAnywhere, Category = "Debug|PowerUps")
+	bool bDebugInfinitePowerUps = false;
+#endif
+
 public:
 	AHivePawn(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
+#if WITH_EDITOR
+	bool ShouldDebugInfinitePowerUps() const { return bDebugInfinitePowerUps; }
+#endif
 
 	// Begin Pawn interface
 
@@ -200,6 +212,8 @@ public:
 	/** Handle reset vehicle input by input actions or mobile interface */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	void DoResetVehicle();
+
+	void RefreshLiveInputState();
 
 protected:
 

@@ -4,11 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "HiveUI.h"
 #include "HivePlayerController.generated.h"
 
 class UInputMappingContext;
 class AHivePawn;
-class UHiveUI;
+class APowerUpBase;
+class UPowerUpSlotComponent;
 
 /**
  *  Vehicle Player Controller class
@@ -65,6 +67,9 @@ protected:
 	/** Pointer to the UI widget */
 	UPROPERTY()
 	TObjectPtr<UHiveUI> VehicleUI;
+
+	bool bHasLastPowerUpStatus = false;
+	FHivePowerUpStatusUIData LastPowerUpStatus;
 		
 protected:
 
@@ -88,6 +93,18 @@ protected:
 	UFUNCTION()
 	void OnPawnDestroyed(AActor* DestroyedPawn);
 
+	UFUNCTION()
+	void OnPowerUpSlotChanged(int32 SlotIndex, APowerUpBase* NewContent);
+
+	UFUNCTION()
+	void OnPowerUpSlotsDisabledChanged(bool bSlotsDisabled);
+
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
+
+	void BindPowerUpSlotEvents(AHivePawn* PawnToBind);
+	void UnbindPowerUpSlotEvents(AHivePawn* PawnToUnbind);
+	UPowerUpSlotComponent* GetCurrentPowerUpSlots() const;
+	void RefreshPowerUpSlots();
+	void RefreshPowerUpStatus(bool bForceUpdate);
 };

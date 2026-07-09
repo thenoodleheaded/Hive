@@ -2,8 +2,10 @@
 
 #include "HiveVehicleMovementComponent.h"
 #include "Hive.h"
+#include "HivePawn.h"
 #include "HiveSportsCar.h"
-#include "Engine/Engine.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "TimerManager.h"
 #include "UCarPhysicsProfile.h"
 
 namespace
@@ -91,6 +93,7 @@ void UHiveVehicleMovementComponent::SetupVehicle(TUniquePtr<Chaos::FSimpleWheele
 	}
 
 	BaseWheelFrictionMultipliers.Reset(PVehicle->Wheels.Num());
+	ExternalFrictionMultipliers.Init(1.0f, PVehicle->Wheels.Num());
 
 	const int32 ProfiledWheelCount = bHasPendingProfileValues ? FMath::Min(4, PVehicle->Wheels.Num()) : 0;
 	for (int32 WheelIndex = 0; WheelIndex < PVehicle->Wheels.Num(); ++WheelIndex)
@@ -110,6 +113,11 @@ void UHiveVehicleMovementComponent::SetupVehicle(TUniquePtr<Chaos::FSimpleWheele
 		BaseWheelFrictionMultipliers.Add(VehicleWheel.FrictionMultiplier);
 	}
 
+	if (PVehicle->Wheels.Num() > 0)
+	{
+		BaseFrontMaxSteerAngle = PVehicle->Wheels[0].MaxSteeringAngle;
+	}
+
 	CurrentRearFriction = GetTargetRearFriction();
 	CurrentAppliedRearFriction = CurrentRearFriction * CurrentGripBlendFactor;
 }
@@ -126,29 +134,20 @@ void UHiveVehicleMovementComponent::TickComponent(float DeltaTime, ELevelTick Ti
 
 	UpdateDriftState(DeltaTime, BrakeInputValue, SteeringInputValue, bHandbrakeActive);
 
-	if (bOverrideThrottleDuringDrift && CurrentDriftState == EHiveDriftState::Drifting)
+	if (bOverrideThrottleDuringDrift && CurrentDriftState == EHiveDriftState::Drifting && !bSuppressThrottleOverrideForCurrentDrift)
 	{
 		SetThrottleInput(1.0f);
 	}
 
+	if (bEnableYawDamping)
+	{
+		ApplyDriftYawDamping();
+	}
 	UpdateGripBlend(DeltaTime);
 	UpdateRearFriction(DeltaTime);
+	UpdateSpeedSensitiveSteering();
+	EnforceSpeedCap(false);
 
-	if (GEngine)
-	{
-		const FString InitiatingTimerText = CurrentDriftState == EHiveDriftState::Initiating ? FString::Printf(TEXT("%.2f"), InitiatingTimer) : FString();
-		GEngine->AddOnScreenDebugMessage(
-			482001,
-			0.0f,
-			FColor::Cyan,
-			FString::Printf(TEXT("Drift=%s | Brake=%.1f | Steer=%.1f | GripBlend=%.2f | RearFric=%.2f | Init=%s"),
-				LexToString(CurrentDriftState),
-				BrakeInputValue,
-				SteeringInputValue,
-				CurrentGripBlendFactor,
-				CurrentAppliedRearFriction,
-				*InitiatingTimerText));
-	}
 }
 
 float UHiveVehicleMovementComponent::ComputeBodySlipAngleDegrees() const
@@ -175,6 +174,74 @@ float UHiveVehicleMovementComponent::GetBrakeInput()
 	return UChaosWheeledVehicleMovementComponent::GetBrakeInput();
 }
 
+void UHiveVehicleMovementComponent::ApplyFullInputFreeze(float Duration)
+{
+	FrozenThrottleValue = GetThrottleInput();
+	FrozenBrakeValue = GetBrakeInput();
+	FrozenSteeringValue = GetSteeringInput();
+	bInputFrozen = true;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(InputFreezeRestoreTimerHandle);
+		World->GetTimerManager().SetTimer(InputFreezeRestoreTimerHandle, this, &UHiveVehicleMovementComponent::RestoreFullInputFreeze, Duration, false);
+	}
+}
+
+void UHiveVehicleMovementComponent::ApplyTemporarySteeringMultiplier(float Multiplier, float Duration)
+{
+	TemporarySteeringMultiplier = FMath::Clamp(Multiplier, 0.0f, 1.0f);
+	bTemporarySteeringMultiplierActive = Duration > 0.0f && TemporarySteeringMultiplier < 1.0f;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TemporarySteeringMultiplierRestoreTimerHandle);
+		if (bTemporarySteeringMultiplierActive)
+		{
+			World->GetTimerManager().SetTimer(TemporarySteeringMultiplierRestoreTimerHandle, this, &UHiveVehicleMovementComponent::RestoreTemporarySteeringMultiplier, Duration, false);
+		}
+	}
+
+	UE_LOG(LogHive, Verbose, TEXT("[SteeringReduction] %s multiplier %.2f applied for %.2fs."),
+		*GetNameSafe(GetOwner()),
+		TemporarySteeringMultiplier,
+		Duration);
+}
+
+void UHiveVehicleMovementComponent::ForceDriftFromExternalImpact()
+{
+	SetDriftState(EHiveDriftState::Drifting);
+	bSuppressThrottleOverrideForCurrentDrift = true;
+}
+
+void UHiveVehicleMovementComponent::SetExternalFrictionMultiplier(int32 WheelIndex, float Multiplier)
+{
+	if (!ExternalFrictionMultipliers.IsValidIndex(WheelIndex))
+	{
+		return;
+	}
+
+	ExternalFrictionMultipliers[WheelIndex] = FMath::Max(0.0f, Multiplier);
+}
+
+void UHiveVehicleMovementComponent::ApplySpeedCap(float MaxSpeed)
+{
+	ActiveSpeedCap = FMath::Max(0.0f, MaxSpeed);
+	bSpeedCapActive = ActiveSpeedCap > KINDA_SMALL_NUMBER;
+	EnforceSpeedCap(true);
+}
+
+void UHiveVehicleMovementComponent::ClearSpeedCap()
+{
+	if (bSpeedCapActive)
+	{
+		UE_LOG(LogHive, Verbose, TEXT("[SlowFieldCap] Cleared speed cap on %s."), *GetNameSafe(GetOwner()));
+	}
+
+	bSpeedCapActive = false;
+	ActiveSpeedCap = 0.0f;
+}
+
 void UHiveVehicleMovementComponent::UpdateDriftState(float DeltaTime, float BrakeInputValue, float SteeringInputValue, bool bHandbrakeActive)
 {
 	const bool bBrakeDriftActive = BrakeInputValue > BrakeDriftThreshold;
@@ -182,11 +249,12 @@ void UHiveVehicleMovementComponent::UpdateDriftState(float DeltaTime, float Brak
 	const bool bBrakeDriftTriggerActive = bBrakeDriftActive && FMath::Abs(SteeringInputValue) > MinSteerForBrakeDrift;
 	const bool bHandbrakePressedThisTick = !bLastHandbrakeState && bHandbrakeActive;
 	const bool bHandbrakeTapTriggerActive = bHandbrakePressedThisTick && bSteerDriftActive;
+	const bool bMovingForwardForDrift = GetForwardSpeed() > MinForwardSpeedForDrift && GetTargetGear() >= 0;
 
 	switch (CurrentDriftState)
 	{
 	case EHiveDriftState::Gripping:
-		if (bBrakeDriftTriggerActive || bHandbrakeTapTriggerActive)
+		if (bMovingForwardForDrift && (bBrakeDriftTriggerActive || bHandbrakeTapTriggerActive))
 		{
 			bInitiatedByHandbrakeTap = bHandbrakeTapTriggerActive;
 			SetDriftState(EHiveDriftState::Initiating);
@@ -194,7 +262,11 @@ void UHiveVehicleMovementComponent::UpdateDriftState(float DeltaTime, float Brak
 		break;
 
 	case EHiveDriftState::Initiating:
-		if (!bInitiatedByHandbrakeTap && !bBrakeDriftActive)
+		if (!bMovingForwardForDrift)
+		{
+			SetDriftState(EHiveDriftState::Gripping);
+		}
+		else if (!bInitiatedByHandbrakeTap && !bBrakeDriftActive)
 		{
 			SetDriftState(EHiveDriftState::Gripping);
 		}
@@ -274,12 +346,59 @@ void UHiveVehicleMovementComponent::SetDriftState(EHiveDriftState NewState)
 		bInitiatedByHandbrakeTap = false;
 	}
 
-	UE_LOG(LogHive, Log, TEXT("[DriftFSM] State change: %s -> %s at Brake=%.2f, Steering=%.2f, Handbrake=%s"),
+	if (CurrentDriftState != EHiveDriftState::Drifting)
+	{
+		bSuppressThrottleOverrideForCurrentDrift = false;
+	}
+
+	UE_LOG(LogHive, Verbose, TEXT("[DriftFSM] State change: %s -> %s at Brake=%.2f, Steering=%.2f, Handbrake=%s"),
 		LexToString(OldState),
 		LexToString(CurrentDriftState),
 		GetBrakeInput(),
 		GetSteeringInput(),
 		GetHandbrakeInput() ? TEXT("true") : TEXT("false"));
+}
+
+void UHiveVehicleMovementComponent::ApplyDriftYawDamping()
+{
+	if (CurrentDriftState != EHiveDriftState::Drifting && CurrentDriftState != EHiveDriftState::Recovering)
+	{
+		return;
+	}
+
+	if (YawDampingStrength <= 0.0f)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* PhysicsComponent = Cast<UPrimitiveComponent>(UpdatedComponent ? UpdatedComponent.Get() : nullptr);
+	if (!PhysicsComponent)
+	{
+		PhysicsComponent = Cast<UPrimitiveComponent>(GetOwner() ? GetOwner()->GetRootComponent() : nullptr);
+	}
+
+	FBodyInstance* BodyInstance = PhysicsComponent ? PhysicsComponent->GetBodyInstance() : nullptr;
+	if (!BodyInstance)
+	{
+		return;
+	}
+
+	const FVector UpAxis = PhysicsComponent->GetUpVector();
+	const FVector AngularVelocity = BodyInstance->GetUnrealWorldAngularVelocityInRadians();
+	const float YawRate = FVector::DotProduct(AngularVelocity, UpAxis);
+	const FVector RawDampingTorque = -UpAxis * YawRate * YawDampingStrength;
+	const FVector DampingTorque = RawDampingTorque * YawDampingDebugScale;
+	const float AppliedYawTorque = FVector::DotProduct(DampingTorque, UpAxis);
+
+	BodyInstance->AddTorqueInRadians(DampingTorque, false, true);
+
+	UE_LOG(LogHive, Verbose, TEXT("[DriftYawDamping] YawRate=%.3f rad/s Sign=%+.0f, AppliedYawTorque=%.3f Sign=%+.0f, DebugScale=%.3f, DampingTorque=%s"),
+		YawRate,
+		FMath::Sign(YawRate),
+		AppliedYawTorque,
+		FMath::Sign(AppliedYawTorque),
+		YawDampingDebugScale,
+		*DampingTorque.ToCompactString());
 }
 
 void UHiveVehicleMovementComponent::UpdateGripBlend(float DeltaTime)
@@ -298,18 +417,13 @@ void UHiveVehicleMovementComponent::ApplyGripBlendToWheels()
 		return;
 	}
 
-	CurrentAppliedFrictionMultiplier = 0.0f;
-
 	for (int32 WheelIndex = 0; WheelIndex < BaseWheelFrictionMultipliers.Num(); ++WheelIndex)
 	{
 		const bool bProtectFrontGrip = CurrentDriftState == EHiveDriftState::Drifting && WheelIndex < 2;
-		const float AppliedFriction = bProtectFrontGrip ? BaseWheelFrictionMultipliers[WheelIndex] : BaseWheelFrictionMultipliers[WheelIndex] * CurrentGripBlendFactor;
+		const float BaseAppliedFriction = bProtectFrontGrip ? BaseWheelFrictionMultipliers[WheelIndex] : BaseWheelFrictionMultipliers[WheelIndex] * CurrentGripBlendFactor;
+		const float ExternalMultiplier = ExternalFrictionMultipliers.IsValidIndex(WheelIndex) ? ExternalFrictionMultipliers[WheelIndex] : 1.0f;
+		const float AppliedFriction = BaseAppliedFriction * ExternalMultiplier;
 		SetWheelFrictionMultiplier(WheelIndex, AppliedFriction);
-
-		if (WheelIndex == 0)
-		{
-			CurrentAppliedFrictionMultiplier = AppliedFriction;
-		}
 	}
 }
 
@@ -323,12 +437,11 @@ void UHiveVehicleMovementComponent::LogGripBlendIfNeeded(float TargetGripBlendFa
 		return;
 	}
 
-	UE_LOG(LogHive, Log, TEXT("[DriftGrip] State=%s, GripBlend=%.2f, TargetGripBlend=%.2f, BaseFriction=%.2f, AppliedFriction=%.2f"),
+	UE_LOG(LogHive, Verbose, TEXT("[DriftGrip] State=%s, GripBlend=%.2f, TargetGripBlend=%.2f, BaseFriction=%.2f"),
 		LexToString(CurrentDriftState),
 		CurrentGripBlendFactor,
 		TargetGripBlendFactor,
-		BaseWheelFrictionMultipliers.IsValidIndex(0) ? BaseWheelFrictionMultipliers[0] : 0.0f,
-		CurrentAppliedFrictionMultiplier);
+		BaseWheelFrictionMultipliers.IsValidIndex(0) ? BaseWheelFrictionMultipliers[0] : 0.0f);
 
 	LastLoggedGripBlendFactor = CurrentGripBlendFactor;
 }
@@ -343,8 +456,11 @@ void UHiveVehicleMovementComponent::UpdateRearFriction(float DeltaTime)
 	CurrentRearFriction = FMath::FInterpTo(CurrentRearFriction, GetTargetRearFriction(), DeltaTime, GripBlendSpeed);
 	CurrentAppliedRearFriction = CurrentRearFriction * CurrentGripBlendFactor;
 
-	SetWheelFrictionMultiplier(2, CurrentAppliedRearFriction);
-	SetWheelFrictionMultiplier(3, CurrentAppliedRearFriction);
+	const float RearLeftExternalMultiplier = ExternalFrictionMultipliers.IsValidIndex(2) ? ExternalFrictionMultipliers[2] : 1.0f;
+	const float RearRightExternalMultiplier = ExternalFrictionMultipliers.IsValidIndex(3) ? ExternalFrictionMultipliers[3] : 1.0f;
+
+	SetWheelFrictionMultiplier(2, CurrentAppliedRearFriction * RearLeftExternalMultiplier);
+	SetWheelFrictionMultiplier(3, CurrentAppliedRearFriction * RearRightExternalMultiplier);
 }
 
 float UHiveVehicleMovementComponent::GetTargetRearFriction() const
@@ -362,5 +478,102 @@ float UHiveVehicleMovementComponent::GetTargetRearFriction() const
 	case EHiveDriftState::Gripping:
 	default:
 		return GrippingRearFriction;
+	}
+}
+
+float UHiveVehicleMovementComponent::ComputeSpeedSensitiveSteeringScale(float AbsForwardSpeed) const
+{
+	const float SafeTopSpeedReference = FMath::Max(SteeringTopSpeedReference, 1.0f);
+	const float SpeedAlpha = FMath::Clamp(AbsForwardSpeed / SafeTopSpeedReference, 0.0f, 1.0f);
+	return FMath::Lerp(MinSteeringSpeedScale, MaxSteeringSpeedScale, SpeedAlpha);
+}
+
+void UHiveVehicleMovementComponent::UpdateSpeedSensitiveSteering()
+{
+	const float AbsForwardSpeed = FMath::Abs(GetForwardSpeed());
+	const float SteeringScale = ComputeSpeedSensitiveSteeringScale(AbsForwardSpeed);
+	const float EffectiveSteerAngle = BaseFrontMaxSteerAngle * SteeringScale;
+
+	SetWheelMaxSteerAngle(0, EffectiveSteerAngle);
+	SetWheelMaxSteerAngle(1, EffectiveSteerAngle);
+
+	UWorld* World = GetWorld();
+	const double CurrentTime = World ? World->GetTimeSeconds() : 0.0;
+	if (!World || LastSteeringScaleLogTime < 0.0 || CurrentTime - LastSteeringScaleLogTime >= 0.5)
+	{
+		UE_LOG(LogHive, Verbose, TEXT("[SpeedSteering] %s Speed=%.1f Scale=%.2f BaseAngle=%.1f EffectiveAngle=%.1f"),
+			*GetNameSafe(GetOwner()),
+			AbsForwardSpeed,
+			SteeringScale,
+			BaseFrontMaxSteerAngle,
+			EffectiveSteerAngle);
+
+		LastSteeringScaleLogTime = CurrentTime;
+	}
+}
+
+void UHiveVehicleMovementComponent::RestoreTemporarySteeringMultiplier()
+{
+	bTemporarySteeringMultiplierActive = false;
+	TemporarySteeringMultiplier = 1.0f;
+
+	UE_LOG(LogHive, Verbose, TEXT("[SteeringReduction] %s steering multiplier restored."),
+		*GetNameSafe(GetOwner()));
+}
+
+void UHiveVehicleMovementComponent::EnforceSpeedCap(bool bLogIfApplied)
+{
+	if (!bSpeedCapActive)
+	{
+		return;
+	}
+
+	UPrimitiveComponent* PhysicsComponent = Cast<UPrimitiveComponent>(UpdatedComponent ? UpdatedComponent.Get() : nullptr);
+	if (!PhysicsComponent)
+	{
+		PhysicsComponent = Cast<UPrimitiveComponent>(GetOwner() ? GetOwner()->GetRootComponent() : nullptr);
+	}
+
+	FBodyInstance* BodyInstance = PhysicsComponent ? PhysicsComponent->GetBodyInstance() : nullptr;
+	if (!BodyInstance)
+	{
+		return;
+	}
+
+	const FVector CurrentVelocity = BodyInstance->GetUnrealWorldVelocity();
+	const float CurrentSpeed = CurrentVelocity.Size();
+	if (CurrentSpeed <= ActiveSpeedCap || CurrentSpeed <= KINDA_SMALL_NUMBER)
+	{
+		if (bLogIfApplied)
+		{
+			UE_LOG(LogHive, Verbose, TEXT("[SlowFieldCap] %s speed %.1f is already under cap %.1f."),
+				*GetNameSafe(GetOwner()),
+				CurrentSpeed,
+				ActiveSpeedCap);
+		}
+		return;
+	}
+
+	const FVector CappedVelocity = CurrentVelocity.GetSafeNormal() * ActiveSpeedCap;
+	BodyInstance->SetLinearVelocity(CappedVelocity, false);
+
+	if (bLogIfApplied)
+	{
+		UE_LOG(LogHive, Verbose, TEXT("[SlowFieldCap] %s speed %.1f capped to %.1f. Velocity=%s -> %s"),
+			*GetNameSafe(GetOwner()),
+			CurrentSpeed,
+			ActiveSpeedCap,
+			*CurrentVelocity.ToCompactString(),
+			*CappedVelocity.ToCompactString());
+	}
+}
+
+void UHiveVehicleMovementComponent::RestoreFullInputFreeze()
+{
+	bInputFrozen = false;
+
+	if (AHivePawn* HivePawn = Cast<AHivePawn>(GetOwner()))
+	{
+		HivePawn->RefreshLiveInputState();
 	}
 }

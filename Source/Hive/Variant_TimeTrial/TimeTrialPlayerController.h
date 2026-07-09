@@ -4,12 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "HiveUI.h"
 #include "TimeTrialPlayerController.generated.h"
 
 class ATimeTrialTrackGate;
 class UTimeTrialUI;
 class UInputMappingContext;
-class UHiveUI;
+class APowerUpBase;
+class UPowerUpSlotComponent;
 class AHivePawn;
 
 /**
@@ -68,6 +70,9 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UHiveUI> VehicleUI;
 
+	bool bHasLastPowerUpStatus = false;
+	FHivePowerUpStatusUIData LastPowerUpStatus;
+
 	/** Next track gate the car should pass */
 	TObjectPtr<ATimeTrialTrackGate> TargetGate;
 
@@ -118,6 +123,18 @@ protected:
 	UFUNCTION()
 	void OnPawnDestroyed(AActor* DestroyedPawn);
 
+	UFUNCTION()
+	void OnPowerUpSlotChanged(int32 SlotIndex, APowerUpBase* NewContent);
+
+	UFUNCTION()
+	void OnPowerUpSlotsDisabledChanged(bool bSlotsDisabled);
+
 	/** Returns true if the player should use UMG touch controls */
 	bool ShouldUseTouchControls() const;
+
+	void BindPowerUpSlotEvents(AHivePawn* PawnToBind);
+	void UnbindPowerUpSlotEvents(AHivePawn* PawnToUnbind);
+	UPowerUpSlotComponent* GetCurrentPowerUpSlots() const;
+	void RefreshPowerUpSlots();
+	void RefreshPowerUpStatus(bool bForceUpdate);
 };

@@ -17,7 +17,8 @@ public class Hive : ModuleRules
 			"ChaosVehicles",
 			"PhysicsCore",
 			"UMG",
-			"Slate"
+			"Slate",
+			"Niagara"
 		});
 
 		PublicIncludePaths.AddRange(new string[] {

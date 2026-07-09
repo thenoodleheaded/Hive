@@ -5,10 +5,13 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
+#include "HiveSportsCar.h"
 #include "HiveVehicleMovementComponent.h"
 #include "InputActionValue.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Hive.h"
+#include "PowerUps/PowerUpBase.h"
+#include "PowerUps/PowerUpSlotComponent.h"
 #include "TimerManager.h"
 
 AHivePawn::AHivePawn(const FObjectInitializer& ObjectInitializer)
@@ -82,6 +85,24 @@ void AHivePawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputComp
 
 		// reset the vehicle 
 		EnhancedInputComponent->BindAction(ResetVehicleAction, ETriggerEvent::Triggered, this, &AHivePawn::ResetVehicle);
+
+		// activate power-up slot 1
+		const UInputAction* ActivatePowerUpSlot1Action = LoadObject<UInputAction>(nullptr, TEXT("/Game/VehicleTemplate/Input/Actions/IA_ActivatePowerUp_Slot1.IA_ActivatePowerUp_Slot1"));
+		if (ActivatePowerUpSlot1Action)
+		{
+			EnhancedInputComponent->BindActionValueLambda(ActivatePowerUpSlot1Action, ETriggerEvent::Started, [this](const FInputActionValue&)
+			{
+				if (AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(this))
+				{
+					SportsCar->ActivatePowerUp(0);
+				}
+			});
+		}
+		else
+		{
+			UE_LOG(LogHive, Warning, TEXT("IA_ActivatePowerUp_Slot1 was not found. Create it in /Game/VehicleTemplate/Input/Actions and add it to the active input mapping context to enable slot 1 activation."));
+		}
+
 	}
 	else
 	{
@@ -95,6 +116,50 @@ void AHivePawn::BeginPlay()
 
 	// set up the flipped check timer
 	GetWorld()->GetTimerManager().SetTimer(FlipCheckTimer, this, &AHivePawn::FlippedCheck, FlipCheckTime, true);
+
+#if WITH_EDITOR
+	AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(this);
+	UPowerUpSlotComponent* PowerUpSlots = SportsCar ? SportsCar->GetPowerUpSlots() : nullptr;
+	if (PowerUpSlots)
+	{
+		for (int32 DebugPowerUpIndex = 0; DebugPowerUpIndex < DebugStartingPowerUps.Num(); ++DebugPowerUpIndex)
+		{
+			TSubclassOf<APowerUpBase> PowerUpClass = DebugStartingPowerUps[DebugPowerUpIndex];
+			if (!PowerUpClass)
+			{
+				continue;
+			}
+
+			int32 TargetSlotIndex = INDEX_NONE;
+			for (int32 SlotIndex = 0; SlotIndex < PowerUpSlots->MaxSlots; ++SlotIndex)
+			{
+				if (!PowerUpSlots->GetSlotContent(SlotIndex))
+				{
+					TargetSlotIndex = SlotIndex;
+					break;
+				}
+			}
+
+			APowerUpBase* DebugPowerUp = GetWorld()->SpawnActor<APowerUpBase>(PowerUpClass, GetActorLocation(), GetActorRotation());
+			if (!DebugPowerUp)
+			{
+				UE_LOG(LogHive, Warning, TEXT("[DebugPowerUps] Failed to spawn %s for %s."), *GetNameSafe(PowerUpClass.Get()), *GetNameSafe(this));
+				continue;
+			}
+
+			const bool bAddedPowerUp = PowerUpSlots->TryAddPowerUp(DebugPowerUp);
+			if (bAddedPowerUp)
+			{
+				UE_LOG(LogHive, Log, TEXT("[DebugPowerUps] Injected %s into slot %d on %s."), *GetNameSafe(DebugPowerUp), TargetSlotIndex, *GetNameSafe(this));
+			}
+			else
+			{
+				UE_LOG(LogHive, Warning, TEXT("[DebugPowerUps] Could not inject %s into %s because all power-up slots are full."), *GetNameSafe(DebugPowerUp), *GetNameSafe(this));
+				DebugPowerUp->Destroy();
+			}
+		}
+	}
+#endif
 }
 
 void AHivePawn::EndPlay(EEndPlayReason::Type EndPlayReason)
@@ -209,12 +274,36 @@ void AHivePawn::ResetVehicle(const FInputActionValue& Value)
 
 void AHivePawn::DoSteering(float SteeringValue)
 {
+	if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(ChaosVehicleMovement))
+	{
+		if (HiveMovement->IsInputFrozen())
+		{
+			ChaosVehicleMovement->SetSteeringInput(HiveMovement->GetFrozenSteeringValue());
+			ChaosVehicleMovement->SetThrottleInput(HiveMovement->GetFrozenThrottleValue());
+			ChaosVehicleMovement->SetBrakeInput(HiveMovement->GetFrozenBrakeValue());
+			return;
+		}
+
+		SteeringValue *= HiveMovement->GetTemporarySteeringMultiplier();
+	}
+
 	// add the input
 	ChaosVehicleMovement->SetSteeringInput(SteeringValue);
 }
 
 void AHivePawn::DoThrottle(float ThrottleValue)
 {
+	if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(ChaosVehicleMovement))
+	{
+		if (HiveMovement->IsInputFrozen())
+		{
+			ChaosVehicleMovement->SetSteeringInput(HiveMovement->GetFrozenSteeringValue());
+			ChaosVehicleMovement->SetThrottleInput(HiveMovement->GetFrozenThrottleValue());
+			ChaosVehicleMovement->SetBrakeInput(HiveMovement->GetFrozenBrakeValue());
+			return;
+		}
+	}
+
 	// add the input
 	ChaosVehicleMovement->SetThrottleInput(ThrottleValue);
 
@@ -224,6 +313,17 @@ void AHivePawn::DoThrottle(float ThrottleValue)
 
 void AHivePawn::DoBrake(float BrakeValue)
 {
+	if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(ChaosVehicleMovement))
+	{
+		if (HiveMovement->IsInputFrozen())
+		{
+			ChaosVehicleMovement->SetSteeringInput(HiveMovement->GetFrozenSteeringValue());
+			ChaosVehicleMovement->SetThrottleInput(HiveMovement->GetFrozenThrottleValue());
+			ChaosVehicleMovement->SetBrakeInput(HiveMovement->GetFrozenBrakeValue());
+			return;
+		}
+	}
+
 	// add the input
 	ChaosVehicleMovement->SetBrakeInput(BrakeValue);
 
@@ -242,8 +342,41 @@ void AHivePawn::DoBrakeStop()
 	// call the Blueprint hook for the brake lights
 	BrakeLights(false);
 
+	if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(ChaosVehicleMovement))
+	{
+		if (HiveMovement->IsInputFrozen())
+		{
+			ChaosVehicleMovement->SetSteeringInput(HiveMovement->GetFrozenSteeringValue());
+			ChaosVehicleMovement->SetThrottleInput(HiveMovement->GetFrozenThrottleValue());
+			ChaosVehicleMovement->SetBrakeInput(HiveMovement->GetFrozenBrakeValue());
+			return;
+		}
+	}
+
 	// reset brake input to zero
 	ChaosVehicleMovement->SetBrakeInput(0.0f);
+}
+
+void AHivePawn::RefreshLiveInputState()
+{
+	UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent);
+	if (!EnhancedInputComponent || !ChaosVehicleMovement)
+	{
+		return;
+	}
+
+	float SteeringValue = SteeringAction ? EnhancedInputComponent->GetBoundActionValue(SteeringAction).Get<float>() : 0.0f;
+	const float ThrottleValue = ThrottleAction ? EnhancedInputComponent->GetBoundActionValue(ThrottleAction).Get<float>() : 0.0f;
+	const float BrakeValue = BrakeAction ? EnhancedInputComponent->GetBoundActionValue(BrakeAction).Get<float>() : 0.0f;
+
+	if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(ChaosVehicleMovement))
+	{
+		SteeringValue *= HiveMovement->GetTemporarySteeringMultiplier();
+	}
+
+	ChaosVehicleMovement->SetSteeringInput(SteeringValue);
+	ChaosVehicleMovement->SetThrottleInput(ThrottleValue);
+	ChaosVehicleMovement->SetBrakeInput(BrakeValue);
 }
 
 void AHivePawn::DoHandbrakeStart()

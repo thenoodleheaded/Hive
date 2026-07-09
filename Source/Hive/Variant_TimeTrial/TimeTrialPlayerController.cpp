@@ -11,11 +11,14 @@
 #include "InputMappingContext.h"
 #include "HiveUI.h"
 #include "HivePawn.h"
+#include "HiveSportsCar.h"
+#include "HiveVehicleMovementComponent.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Hive.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerStart.h"
+#include "PowerUps/PowerUpSlotComponent.h"
 #include "Widgets/Input/SVirtualJoystick.h"
 
 void ATimeTrialPlayerController::SetupInputComponent()
@@ -92,6 +95,8 @@ void ATimeTrialPlayerController::SetupInputComponent()
 		if (VehicleUI)
 		{
 			VehicleUI->AddToPlayerScreen(0);
+			RefreshPowerUpSlots();
+			RefreshPowerUpStatus(true);
 
 		} else {
 
@@ -105,11 +110,22 @@ void ATimeTrialPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
+	if (VehiclePawn)
+	{
+		VehiclePawn->OnDestroyed.RemoveDynamic(this, &ATimeTrialPlayerController::OnPawnDestroyed);
+		UnbindPowerUpSlotEvents(VehiclePawn);
+	}
+
 	// get a pointer to the controlled pawn
 	VehiclePawn = CastChecked<AHivePawn>(InPawn);
 
 	// subscribe to the pawn's OnDestroyed delegate
+	VehiclePawn->OnDestroyed.RemoveDynamic(this, &ATimeTrialPlayerController::OnPawnDestroyed);
 	VehiclePawn->OnDestroyed.AddDynamic(this, &ATimeTrialPlayerController::OnPawnDestroyed);
+
+	BindPowerUpSlotEvents(VehiclePawn);
+	RefreshPowerUpSlots();
+	RefreshPowerUpStatus(true);
 
 	// disable input on the pawn if the race hasn't started yet
 	if (!bRaceStarted)
@@ -126,6 +142,7 @@ void ATimeTrialPlayerController::Tick(float Delta)
 	{
 		VehicleUI->UpdateSpeed(VehiclePawn->GetChaosVehicleMovement()->GetForwardSpeed());
 		VehicleUI->UpdateGear(VehiclePawn->GetChaosVehicleMovement()->GetCurrentGear());
+		RefreshPowerUpStatus(false);
 	}
 }
 
@@ -172,6 +189,8 @@ void ATimeTrialPlayerController::SetTargetGate(ATimeTrialTrackGate* Gate)
 
 void ATimeTrialPlayerController::OnPawnDestroyed(AActor* DestroyedPawn)
 {
+	UnbindPowerUpSlotEvents(Cast<AHivePawn>(DestroyedPawn));
+
 	// find the player start
 	TArray<AActor*> ActorList;
 	UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), ActorList);
@@ -193,4 +212,128 @@ bool ATimeTrialPlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+}
+
+void ATimeTrialPlayerController::OnPowerUpSlotChanged(int32 SlotIndex, APowerUpBase* NewContent)
+{
+	if (!VehicleUI)
+	{
+		return;
+	}
+
+	UPowerUpSlotComponent* PowerUpSlots = GetCurrentPowerUpSlots();
+	VehicleUI->UpdatePowerUpSlot(SlotIndex, NewContent, PowerUpSlots ? PowerUpSlots->AreSlotsDisabled() : false);
+}
+
+void ATimeTrialPlayerController::OnPowerUpSlotsDisabledChanged(bool bSlotsDisabled)
+{
+	RefreshPowerUpSlots();
+	RefreshPowerUpStatus(true);
+}
+
+void ATimeTrialPlayerController::BindPowerUpSlotEvents(AHivePawn* PawnToBind)
+{
+	AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(PawnToBind);
+	UPowerUpSlotComponent* PowerUpSlots = SportsCar ? SportsCar->GetPowerUpSlots() : nullptr;
+	if (!PowerUpSlots)
+	{
+		return;
+	}
+
+	PowerUpSlots->OnSlotChanged.RemoveDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotChanged);
+	PowerUpSlots->OnSlotChanged.AddDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotChanged);
+	PowerUpSlots->OnSlotsDisabledChanged.RemoveDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotsDisabledChanged);
+	PowerUpSlots->OnSlotsDisabledChanged.AddDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotsDisabledChanged);
+}
+
+void ATimeTrialPlayerController::UnbindPowerUpSlotEvents(AHivePawn* PawnToUnbind)
+{
+	AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(PawnToUnbind);
+	UPowerUpSlotComponent* PowerUpSlots = SportsCar ? SportsCar->GetPowerUpSlots() : nullptr;
+	if (!PowerUpSlots)
+	{
+		return;
+	}
+
+	PowerUpSlots->OnSlotChanged.RemoveDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotChanged);
+	PowerUpSlots->OnSlotsDisabledChanged.RemoveDynamic(this, &ATimeTrialPlayerController::OnPowerUpSlotsDisabledChanged);
+}
+
+UPowerUpSlotComponent* ATimeTrialPlayerController::GetCurrentPowerUpSlots() const
+{
+	const AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(VehiclePawn);
+	return SportsCar ? SportsCar->GetPowerUpSlots() : nullptr;
+}
+
+void ATimeTrialPlayerController::RefreshPowerUpSlots()
+{
+	if (!VehicleUI)
+	{
+		return;
+	}
+
+	UPowerUpSlotComponent* PowerUpSlots = GetCurrentPowerUpSlots();
+	if (!PowerUpSlots)
+	{
+		return;
+	}
+
+	const bool bSlotsDisabled = PowerUpSlots->AreSlotsDisabled();
+	for (int32 SlotIndex = 0; SlotIndex < PowerUpSlots->GetSlotCount(); ++SlotIndex)
+	{
+		VehicleUI->UpdatePowerUpSlot(SlotIndex, PowerUpSlots->GetSlotContent(SlotIndex), bSlotsDisabled);
+	}
+}
+
+void ATimeTrialPlayerController::RefreshPowerUpStatus(bool bForceUpdate)
+{
+	if (!VehicleUI)
+	{
+		return;
+	}
+
+	FHivePowerUpStatusUIData StatusData;
+
+	const AHiveSportsCar* SportsCar = Cast<AHiveSportsCar>(VehiclePawn);
+	if (SportsCar)
+	{
+		if (UPowerUpSlotComponent* PowerUpSlots = SportsCar->GetPowerUpSlots())
+		{
+			StatusData.bSlotsDisabled = PowerUpSlots->AreSlotsDisabled();
+		}
+
+		StatusData.bIsEMPed = SportsCar->bIsEMPed;
+		StatusData.bShieldActive = SportsCar->bShieldActive;
+		StatusData.bMirrorShieldActive = SportsCar->bMirrorShieldActive;
+
+		if (const UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(SportsCar->GetChaosVehicleMovement()))
+		{
+			StatusData.bInputFrozen = HiveMovement->IsInputFrozen();
+			StatusData.bSpeedCapped = HiveMovement->IsSpeedCapActive();
+			StatusData.ActiveSpeedCap = HiveMovement->GetActiveSpeedCap();
+			StatusData.bSteeringReduced = HiveMovement->IsTemporarySteeringMultiplierActive();
+			StatusData.SteeringMultiplier = HiveMovement->GetTemporarySteeringMultiplier();
+		}
+	}
+
+	const bool bStatusChanged =
+		!bHasLastPowerUpStatus ||
+		LastPowerUpStatus.bSlotsDisabled != StatusData.bSlotsDisabled ||
+		LastPowerUpStatus.bIsEMPed != StatusData.bIsEMPed ||
+		LastPowerUpStatus.bShieldActive != StatusData.bShieldActive ||
+		LastPowerUpStatus.bMirrorShieldActive != StatusData.bMirrorShieldActive ||
+		LastPowerUpStatus.bInputFrozen != StatusData.bInputFrozen ||
+		LastPowerUpStatus.bSpeedCapped != StatusData.bSpeedCapped ||
+		LastPowerUpStatus.bSteeringReduced != StatusData.bSteeringReduced ||
+		!FMath::IsNearlyEqual(LastPowerUpStatus.ActiveSpeedCap, StatusData.ActiveSpeedCap, 1.0f) ||
+		!FMath::IsNearlyEqual(LastPowerUpStatus.SteeringMultiplier, StatusData.SteeringMultiplier, 0.01f);
+
+	if (!bForceUpdate && !bStatusChanged)
+	{
+		return;
+	}
+
+	VehicleUI->UpdatePowerUpStatus(StatusData);
+	LastPowerUpStatus = StatusData;
+	bHasLastPowerUpStatus = true;
 }

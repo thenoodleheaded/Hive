@@ -2,15 +2,31 @@
 
 
 #include "HiveSportsCar.h"
+#include "Components/SphereComponent.h"
 #include "HiveSportsWheelFront.h"
 #include "HiveSportsWheelRear.h"
 #include "HiveVehicleMovementComponent.h"
+#include "PowerUps/MirrorShield.h"
+#include "PowerUps/PowerUpSlotComponent.h"
+#include "PowerUps/Shield.h"
 #include "WheeledVehiclePawn.h"
 
 AHiveSportsCar::AHiveSportsCar(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UHiveVehicleMovementComponent>(AWheeledVehiclePawn::VehicleMovementComponentName))
 {
 	SyncPhysicsProfileToMovementComponent();
+
+	PowerUpSlots = CreateDefaultSubobject<UPowerUpSlotComponent>(TEXT("PowerUpSlots"));
+
+	GameplayTriggerVolume = CreateDefaultSubobject<USphereComponent>(TEXT("GameplayTriggerVolume"));
+	GameplayTriggerVolume->SetupAttachment(GetRootComponent());
+	GameplayTriggerVolume->InitSphereRadius(150.0f);
+	GameplayTriggerVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	GameplayTriggerVolume->SetCollisionObjectType(ECC_Vehicle);
+	GameplayTriggerVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
+	GameplayTriggerVolume->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+	GameplayTriggerVolume->SetGenerateOverlapEvents(true);
+	GameplayTriggerVolume->SetCanEverAffectNavigation(false);
 
 	// Note: for faster iteration times, the vehicle setup can be tweaked in the Blueprint instead
 
@@ -80,5 +96,53 @@ void AHiveSportsCar::SyncPhysicsProfileToMovementComponent() const
 	if (UHiveVehicleMovementComponent* HiveMovement = Cast<UHiveVehicleMovementComponent>(GetChaosVehicleMovement()))
 	{
 		HiveMovement->PhysicsProfile = PhysicsProfile;
+	}
+}
+
+void AHiveSportsCar::ActivatePowerUp(int32 SlotIndex)
+{
+	if (PowerUpSlots)
+	{
+		PowerUpSlots->ActivateSlot(SlotIndex);
+	}
+}
+
+bool AHiveSportsCar::TryAbsorbHit()
+{
+	return bShieldActive && ActiveShield ? ActiveShield->TryAbsorbHit() : false;
+}
+
+bool AHiveSportsCar::TryReflectProjectile(AActor* Projectile)
+{
+	return bMirrorShieldActive && ActiveMirrorShield ? ActiveMirrorShield->TryReflectProjectile(Projectile) : false;
+}
+
+void AHiveSportsCar::SetActiveShield(AShield* Shield)
+{
+	ActiveShield = Shield;
+	bShieldActive = IsValid(Shield);
+}
+
+void AHiveSportsCar::ClearActiveShield(AShield* Shield)
+{
+	if (ActiveShield == Shield)
+	{
+		ActiveShield = nullptr;
+		bShieldActive = false;
+	}
+}
+
+void AHiveSportsCar::SetActiveMirrorShield(AMirrorShield* MirrorShield)
+{
+	ActiveMirrorShield = MirrorShield;
+	bMirrorShieldActive = IsValid(MirrorShield);
+}
+
+void AHiveSportsCar::ClearActiveMirrorShield(AMirrorShield* MirrorShield)
+{
+	if (ActiveMirrorShield == MirrorShield)
+	{
+		ActiveMirrorShield = nullptr;
+		bMirrorShieldActive = false;
 	}
 }
